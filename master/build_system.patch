@@ -1,0 +1,521 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..ad5dee6
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,3 @@
++/xenmk export-ignore
++.gitattributes export-ignore
++.gitignore export-ignore
+diff --git a/pg_help.in b/pg_help.in
+new file mode 100644
+index 0000000..2d6a018
+--- /dev/null
++++ b/pg_help.in
+@@ -0,0 +1,14 @@
++
++splash.lss
++
++Welcome to @PRODUCT_BRAND@.
++
++  - To install or upgrade press the 0e<ENTER>07 key.
++  - To install or upgrade in safe mode, type 0esafe <ENTER>07.
++  - To boot into a shell prompt, type 0eshell <ENTER>07.
++    (This is an advanced option and should be used with care and as
++     directed by a Technical Support Representative.)
++  - To P2V a machine which does not support 64-bit operation, type
++    0ep2v-legacy <ENTER>07.
++
++0f[F1-Standard] [F2-Advanced]07
+diff --git a/pg_main.in b/pg_main.in
+new file mode 100644
+index 0000000..1c6f5eb
+--- /dev/null
++++ b/pg_main.in
+@@ -0,0 +1,14 @@
++
++splash.lss
++
++Welcome to @PRODUCT_BRAND@.
++
++  - To install or upgrade press the 0e<ENTER>07 key.
++
++
++
++
++
++
++
++0f[F1-Standard] [F2-Advanced]07
+diff --git a/xenmk/Makefile b/xenmk/Makefile
+new file mode 100644
+index 0000000..71dda0b
+--- /dev/null
++++ b/xenmk/Makefile
+@@ -0,0 +1,112 @@
++USE_BRANDING := yes
++IMPORT_BRANDING := yes
++include $(B_BASE)/common.mk
++include $(B_BASE)/rpmbuild.mk
++
++SYSLINUX_VERSION := 4.06
++REPO_NAME= syslinux
++RPM_BUILD_COOKIE= $(MY_OBJ_DIR)/.rpm_build_cookie
++CDFILES_INSTALLED_COOKIE = $(MY_OBJ_DIR)/.cdfiles-installed.cookie
++SYSLINUX_TEST_ISO = $(MY_OUTPUT_DIR)/isolinux-test.iso
++REPO_STAMP = $(call git_req,$(REPO_NAME))
++
++SYSLINUX_BUILD_DIR = $(MY_OBJ_DIR)/RPM_BUILD_DIRECTORY/syslinux-$(SYSLINUX_VERSION)
++ISOLINUX_FILES = core/isolinux.bin com32/mboot/mboot.c32 com32/menu/menu.c32
++PXELINUX_FILES = core/pxelinux.0 com32/mboot/mboot.c32 com32/menu/menu.c32
++REPO_FILES = isolinux.cfg pg_main pg_help
++
++J_FLAG = 8
++MAKE_CMD= $(MAKE) -j$(J_FLAG) -C $(call hg_loc,syslinux)
++
++-include $(MY_OBJ_DIR)/version.inc
++$(MY_OBJ_DIR)/version.inc:
++	rm -f $(MY_OBJ_DIR)/version.inc
++	$(call version-makefile) > $@
++	awk -F. '{ print "REPO_VERSION=" $$0; }' \
++		< $(REPO_STAMP) >> $@
++	$(call git_cset_number,$(REPO_NAME)) >> $@
++	echo SYSLINUX_VERSION := $(SYSLINUX_VERSION) >> $@
++	echo SYSLINUX_RELEASE := xs\$$\(CSET_NUMBER\) >> $@
++
++CHANGELOG_DATE    := $(shell LANG=C date +"%a %b %d %Y")
++CHANGELOG_USER    := $(COMPANY_NAME) <$(COMPANY_WEBSITE)>
++CHANGELOG_HEADER  := * $(CHANGELOG_DATE) $(CHANGELOG_USER) [$(SYSLINUX_VERSION) $(SYSLINUX_RELEASE)]
++CHANGELOG_MESSAGE := - Build syslinux.
++
++.PHONY: build
++build: $(RPM_BUILD_COOKIE) $(CDFILES_INSTALLED_COOKIE) $(SYSLINUX_TEST_ISO) $(MY_SOURCES)/MANIFEST
++	@ :
++
++.PHONY: clean
++clean:
++	rm -f $(RPM_BUILD_COOKIE)
++	rm -f $(MY_OBJ_DIR)/version.inc
++
++SOURCES = $(RPM_SOURCESDIR)/syslinux-$(SYSLINUX_VERSION).tar.bz2 \
++	  $(RPM_SOURCESDIR)/syslinux-development.patch \
++	  $(RPM_SPECSDIR)/syslinux.spec
++
++# extract, remove and pack again cause git inside chroot does not support gitattributes
++# and tar inside chroot does not support --delete properly
++$(RPM_SOURCESDIR)/syslinux-$(SYSLINUX_VERSION).tar.bz2: $(RPM_SOURCESDIR)/.dirstamp $(call git_loc,$(REPO_NAME))
++	set -e; cd $(call git_loc,$(REPO_NAME)); git archive --prefix=syslinux-$(SYSLINUX_VERSION)/ HEAD | tar xf -; \
++	rm -rf syslinux-$(SYSLINUX_VERSION)/xenmk syslinux-$(SYSLINUX_VERSION)/.gitattributes; \
++	tar jcf $@ syslinux-$(SYSLINUX_VERSION); rm -rf syslinux-$(SYSLINUX_VERSION)
++
++# TODO exclude xenmk directory
++$(RPM_SOURCESDIR)/syslinux-development.patch: $(RPM_SOURCESDIR)/.dirstamp $(call git_loc,$(REPO_NAME))
++	cd $(call git_loc,$(REPO_NAME)) && git diff > $@.tmp
++	mv -f $@.tmp $@
++
++$(RPM_SOURCESDIR)/%.diff: %.diff
++	cp $< $@
++
++$(RPM_SPECSDIR)/syslinux.spec: syslinux.spec.in $(RPM_SPECSDIR)/.dirstamp
++# Use a temporary file because sed in rhel3 doesn't understand "\n"
++	echo "$(CHANGELOG_HEADER)" > changelog.tmp
++	echo "$(CHANGELOG_MESSAGE)" >> changelog.tmp
++	echo "" >> changelog.tmp
++	sed -e s\,@REPO_VERSION@,$(REPO_VERSION),g \
++	    -e s\,@SYSLINUX_VERSION@,$(SYSLINUX_VERSION),g\
++	    -e s\,@SYSLINUX_RELEASE@,$(SYSLINUX_RELEASE),g\
++	    -e \\,%changelog,rchangelog.tmp             \
++	    < syslinux.spec.in                           \
++	    > $(RPM_SPECSDIR)/syslinux.spec
++	-rm changelog.tmp
++
++$(RPM_BUILD_COOKIE): $(RPM_DIRECTORIES) $(SOURCES)
++	$(RPMBUILD) --target i686 -ba $(RPM_SPECSDIR)/syslinux.spec
++	@touch $@
++
++$(MY_OBJ_DIR)/splash.lss: $(RPM_BUILD_COOKIE) $(BRANDING_DIR)/splash.ppm
++# See http://www.sweb.cz/Frantisek.Rysanek/splash/isolinux-splash-HOWTO.html
++# for details of the splash requirements.
++	$(SYSLINUX_BUILD_DIR)/utils/ppmtolss16 \
++		< $(BRANDING_DIR)/splash.ppm > $@
++	$(SYSLINUX_BUILD_DIR)/utils/lss16toppm -map < $@ > /dev/null
++
++$(CDFILES_INSTALLED_COOKIE): $(RPM_BUILD_COOKIE) $(addsuffix .in,$(REPO_FILES)) $(MY_OBJ_DIR)/splash.lss
++	$(call mkdir_clean,$(MY_MAIN_CDFILES))
++	mkdir -p $(MY_MAIN_CDFILES)/boot/isolinux
++	cp $(addprefix $(SYSLINUX_BUILD_DIR)/,$(ISOLINUX_FILES)) \
++		$(MY_MAIN_CDFILES)/boot/isolinux
++	$(foreach i,$(REPO_FILES),$(call brand,$(i).in) >$(MY_MAIN_CDFILES)/boot/isolinux/$(i);)
++	cp $(MY_OBJ_DIR)/splash.lss $(MY_MAIN_CDFILES)/boot/isolinux/splash.lss
++	mkdir -p $(MY_MAIN_CDFILES)/boot/pxelinux
++	cp $(addprefix $(SYSLINUX_BUILD_DIR)/,$(PXELINUX_FILES)) \
++		$(MY_MAIN_CDFILES)/boot/pxelinux
++
++$(SYSLINUX_TEST_ISO): $(CDFILES_INSTALLED_COOKIE)
++	mkisofs -joliet -joliet-long -r \
++		-b boot/isolinux/isolinux.bin \
++		-c boot/isolinux/boot.cat \
++		-no-emul-boot -boot-load-size 4 -boot-info-table \
++		-o $@ $(MY_MAIN_CDFILES)
++
++$(MY_SOURCES)/MANIFEST: $(MY_SOURCES_DIRSTAMP) $(RPM_BUILD_COOKIE)
++	( echo "$(COMPONENT) gpl file $(RPM_SRPMSDIR)/syslinux-$(SYSLINUX_VERSION)-$(SYSLINUX_RELEASE).src.rpm" ; \
++	) >$@
++
++.PHONY: sources
++sources: $(MY_SOURCES)/MANIFEST
++	@ :
+diff --git a/xenmk/isolinux.cfg.in b/xenmk/isolinux.cfg.in
+new file mode 100644
+index 0000000..676aeb6
+--- /dev/null
++++ b/xenmk/isolinux.cfg.in
+@@ -0,0 +1,25 @@
++DEFAULT install
++PROMPT 1
++TIMEOUT 50
++DISPLAY pg_main
++F1 pg_main
++F2 pg_help
++
++LABEL install
++	KERNEL mboot.c32
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=max:752M com1=115200,8n1 console=com1,vga --- /boot/vmlinuz xencons=hvc console=hvc0 console=tty0 --- /install.img
++LABEL no-serial
++	KERNEL mboot.c32
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=752M,max:752M console=vga --- /boot/vmlinuz console=tty0 --- /install.img
++LABEL safe
++	KERNEL mboot.c32
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=max:752M nosmp noreboot noirqbalance acpi=off noapic com1=115200,8n1 console=com1,vga vga=keep --- /boot/vmlinuz nousb xencons=hvc console=hvc0 console=tty0 --- /install.img
++LABEL multipath
++	KERNEL mboot.c32
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=max:752M com1=115200,8n1 console=com1,vga --- /boot/vmlinuz xencons=hvc console=hvc0 console=tty0 device_mapper_multipath=enabled --- /install.img
++LABEL shell
++	KERNEL mboot.c32
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=max:752M com1=115200,8n1 console=com1,vga --- /boot/vmlinuz xencons=hvc console=hvc0 console=tty0 bash-shell --- /install.img
++
++LABEL memtest
++	KERNEL memtest
+diff --git a/xenmk/pg_help.in b/xenmk/pg_help.in
+new file mode 100644
+index 0000000..6735754
+--- /dev/null
++++ b/xenmk/pg_help.in
+@@ -0,0 +1,16 @@
++
++splash.lss
++
++05Welcome to @PRODUCT_BRAND@.
++
++  - To install or upgrade press the 0e<ENTER>05 key.
++  - To install or upgrade without a serial console, type 
++    0eno-serial <ENTER>05.
++  - To install or upgrade in safe mode, type 0esafe <ENTER>05.
++  - To install or upgrade to a multipathed root disk, type 0emultipath <ENTER>05.
++  - To boot into a shell prompt, type 0eshell <ENTER>05.
++    (This is an advanced option and should be used with care and as
++     directed by a Technical Support Representative.)
++  - To perform a memory test, type 0ememtest <ENTER>05.
++
++0f[F1-Standard] [F2-Advanced]05
+diff --git a/xenmk/pg_main.in b/xenmk/pg_main.in
+new file mode 100644
+index 0000000..819bf0f
+--- /dev/null
++++ b/xenmk/pg_main.in
+@@ -0,0 +1,14 @@
++
++splash.lss
++
++05Welcome to @PRODUCT_BRAND@.
++
++  - To install or upgrade press the 0e<ENTER>05 key.
++
++
++
++
++
++
++
++0f[F1-Standard] [F2-Advanced]05
+diff --git a/xenmk/syslinux.spec.in b/xenmk/syslinux.spec.in
+new file mode 100644
+index 0000000..db729b8
+--- /dev/null
++++ b/xenmk/syslinux.spec.in
+@@ -0,0 +1,275 @@
++Summary: Simple kernel loader which boots from a FAT filesystem
++Name: syslinux
++Version: @SYSLINUX_VERSION@
++%define tarball_version @SYSLINUX_VERSION@
++Release: @SYSLINUX_RELEASE@
++License: GPL
++Group: Applications/System
++Source0: ftp://ftp.kernel.org/pub/linux/utils/boot/syslinux/%{name}-%{tarball_version}.tar.bz2
++Patch0: syslinux-development.patch
++ExclusiveArch: i686 x86_64
++Buildroot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
++Autoreq: 0
++%ifarch i686
++Requires: libc.so.6
++%endif
++%ifarch x86_64
++Requires: libc.so.6()(64bit)
++%endif
++Obsoletes: syslinux-devel < %{version}-%{release}
++Provides: syslinux-devel
++
++# NOTE: extlinux belongs in /sbin, not in /usr/sbin, since it is typically
++# a system bootloader, and may be necessary for system recovery.
++%define _sbindir /sbin
++
++%description
++SYSLINUX is a suite of bootloaders, currently supporting DOS FAT
++filesystems, Linux ext2/ext3 filesystems (EXTLINUX), PXE network boots
++(PXELINUX), or ISO 9660 CD-ROMs (ISOLINUX).  It also includes a tool,
++MEMDISK, which loads legacy operating systems from these media.
++
++%prep
++%setup -q -n syslinux-%{tarball_version}
++%patch0 -p1 -b .dev
++
++%build
++
++# redirect some command in order to make it work
++rm -rf fakedir
++mkdir fakedir
++cd fakedir
++ln -s /usr/bin/gcc44 gcc
++ln -s /usr/bin/gcc44 cc
++ln -s /usr/libexec/binutils220/as as
++ln -s /usr/libexec/binutils220/ld ld
++ln -s /usr/libexec/binutils220/objdump objdump
++export PATH=$PWD:$PATH
++cd ..
++
++## The following should build everything from scratch but doesn't work
++## in a CentOS 5.x chroot because nasm is out of date.  If nasm is 
++## updated it builds but the result doesn't boot.  This is a known
++## problem (see http://syslinux.zytor.com/archives/2010-September/015347.html)
++## and doc/distrib.txt recommends building only the installer parts
++#
++make spotless
++make all
++make installer
++
++## The following builds only the C-based installer but not any 
++## platform dependent assembly code
++#make clean
++#make installer
++
++# Let's play safe and rebuild NOTHING
++
++%install
++rm -rf %{buildroot}
++
++mkdir -p %{buildroot}%{_bindir}
++mkdir -p %{buildroot}%{_sbindir}
++mkdir -p %{buildroot}%{_prefix}/lib/syslinux
++mkdir -p %{buildroot}%{_includedir}
++make install-all \
++	INSTALLROOT=%{buildroot} BINDIR=%{_bindir} SBINDIR=%{_sbindir} \
++       	LIBDIR=%{_prefix}/lib INCDIR=%{_includedir} MANDIR=%{_mandir}
++make -C sample tidy
++
++%clean
++rm -rf %{buildroot}
++
++%files
++%defattr(-,root,root)
++%doc COPYING NEWS doc/*
++%doc sample
++%{_mandir}/*
++%{_bindir}/*
++%{_sbindir}/*
++%{_prefix}/lib/syslinux
++%{_prefix}/share/syslinux
++/boot
++/tftpboot
++
++%changelog
++* Tue Aug 22 2006 Jesse Keating <jkeating@redhat.com> - 3.11-4
++- Obsolete syslinux-devel.
++- Couple cleanups for packaging guidelines
++
++* Fri Jul 14 2006 David Cantrell <dcantrell@redhat.com> - 3.11-3
++- Remove com32/include/time.h and com32/include/sys/times.h
++- Replace CLK_TCK macros with CLOCKS_PER_SEC
++
++* Wed Jul 12 2006 Jesse Keating <jkeating@redhat.com> - 3.11-2.1
++- rebuild
++
++* Mon Jun 12 2006 Peter Jones <pjones@redhat.com> - 3.11-2
++- Fold -devel subpackage into "syslinux"
++
++* Mon Jun 05 2006 Jesse Keating <jkeating@redhat.com> - 3.10-5
++- Use the actual file as a BuildRequire
++
++* Mon Jun 05 2006 Jesse Keating <jkeating@redhat.com> - 3.10-4
++- Changed glibc-devel to glibc32 to get the 32bit package in
++
++* Mon Jun 05 2006 Jesse Keating <jkeating@redhat.com> - 3.10-3
++- Added missing glibc-devel BuildRequires
++
++* Tue Feb 07 2006 Jesse Keating <jkeating@redhat.com> - 3.10-2.2
++- rebuilt for new gcc4.1 snapshot and glibc changes
++
++* Fri Dec 09 2005 Jesse Keating <jkeating@redhat.com>
++- rebuilt
++
++* Mon Aug 22 2005 Peter Jones <pjones@redhat.com> - 3.10-2
++- Update to 3.10
++- Don't do "make clean", so we actually ship the bins hpa gives us
++
++* Sat Jul  9 2005 Peter Jones <pjones@redhat.com> - 3.09-2
++- Update to 3.09
++
++* Thu Jun 16 2005 Peter Jones <pjones@redhat.com> - 3.08.92-1
++- Update to 3.09-pre2, to fix the i915 .bss overflow bug
++
++* Thu May 19 2005 Peter Jones <pjones@redhat.com> - 3.08-3
++- Fix filespec for samples in -devel
++
++* Thu May 19 2005 Peter Jones <pjones@redhat.com> - 3.08-2
++- update to 3.08
++
++* Wed Mar 16 2005 Peter Jones <pjones@redhat.com> - 3.07-2
++- gcc4 update
++
++* Thu Jan 13 2005 Peter Jones <pjones@redhat.com> - 3.07-1
++- update to 3.07
++
++* Tue Jan 11 2005 Peter Jones <pjones@redhat.com> - 3.06-1
++- update to 3.06 , which should fix the directory parsing bug that wedges it
++  with diskboot.img
++- change README to README* in doc, to include README.menu and README.usbkey
++
++* Tue Jan  4 2005 Peter Jones <pjones@redhat.com> - 3.02-2
++- Beehive doesn't let you build in scratch and then build someplace else,
++  arrrrgh.
++
++* Tue Jan  4 2005 Peter Jones <pjones@redhat.com> - 3.02-1
++- 3.02
++- Make the spec a little closer to hpa's.
++
++* Mon Jan  3 2005 Peter Jones <pjones@redhat.com> - 3.00-2
++- make tag says the tag is there, make build says it's not.
++  Bump release, try again.
++
++* Mon Jan  3 2005 Peter Jones <pjones@redhat.com> - 3.00-1
++- 3.00
++
++* Mon Aug 16 2004 Jeremy Katz <katzj@redhat.com> - 2.11-1
++- 2.11
++
++* Fri Jul 30 2004 Jeremy Katz <katzj@redhat.com> - 2.10-1
++- update to 2.10
++
++* Tue Jun 15 2004 Elliot Lee <sopwith@redhat.com>
++- rebuilt
++
++* Sat Apr 17 2004 Jeremy Katz <katzj@redhat.com> 2.0.8-3
++- add syslinux-nomtools binary to be used for creating some installer images
++
++* Tue Feb 17 2004 Jeremy Katz <katzj@redhat.com> 
++- add netpbm-progs BuildRequires (#110255)
++
++* Fri Feb 13 2004 Elliot Lee <sopwith@redhat.com>
++- rebuilt
++
++* Sun Dec 14 2003 Jeremy Katz <katzj@redhat.com> 2.08-1
++- 2.08
++
++* Fri Aug 22 2003 Jeremy Katz <katzj@redhat.com> 2.06-1
++- 2.06
++
++* Thu Aug 14 2003 Jeremy Katz <katzj@redhat.com> 2.05-1
++- update to 2.05
++
++* Mon Apr 21 2003 Jeremy Katz <katzj@redhat.com> 2.04-2
++- add patch for samples to build on x86_64
++- integrate some changes from upstream specfile (#88593)
++
++* Fri Apr 18 2003 Jeremy Katz <katzj@redhat.com> 2.04-1
++- update to 2.04
++
++* Mon Feb  3 2003 Jeremy Katz <katzj@redhat.com> 2.01-1
++- update to 2.01
++
++* Wed Jan 22 2003 Tim Powers <timp@redhat.com>
++- rebuilt
++
++* Tue Jan 14 2003 Jeremy Katz <katzj@redhat.com> 2.00-3
++- fix deps for x86_64
++
++* Wed Nov 27 2002 Tim Powers <timp@redhat.com> 2.00-2
++- build on both x86_64 and i386
++
++* Fri Nov  1 2002 Jeremy Katz <katzj@redhat.com>
++- update to 2.00
++- add additional files as requested by hpa (#68073)
++
++* Fri Jun 21 2002 Tim Powers <timp@redhat.com>
++- automated rebuild
++
++* Tue Jun 18 2002 Jeremy Katz <katzj@redhat.com>
++- lss16toppm and ppmtolss16 are both perl scripts... turn off find-requires
++  so we don't suck in perl as a dependency for syslinux
++
++* Mon Jun 17 2002 Jeremy Katz <katzj@redhat.com>
++- update to 1.75
++- include tools to create graphical image format needed by syslinux
++- include isolinux 
++- include pxelinux (#64942)
++
++* Fri Jun 14 2002 Preston Brown <pbrown@redhat.com>
++- upgrade to latest version w/graphical screen support
++
++* Thu May 23 2002 Tim Powers <timp@redhat.com>
++- automated rebuild
++
++* Wed Jan 09 2002 Tim Powers <timp@redhat.com>
++- automated rebuild
++
++* Sun Jun 24 2001 Elliot Lee <sopwith@redhat.com>
++- Bump release + rebuild.
++
++* Sat Feb 10 2001 Matt Wilson <msw@redhat.com>
++- 1.52
++
++* Wed Jan 24 2001 Matt Wilson <msw@redhat.com>
++- 1.51pre7
++
++* Mon Jan 22 2001 Matt Wilson <msw@redhat.com>
++- 1.51pre5
++
++* Fri Jan 19 2001 Matt Wilson <msw@redhat.com>
++- 1.51pre3, with e820 detection
++
++* Tue Dec 12 2000 Than Ngo <than@redhat.com>
++- rebuilt with fixed fileutils
++
++* Thu Nov 9 2000 Than Ngo <than@redhat.com>
++- update to 1.49
++- update ftp site
++- clean up specfile
++- add some useful documents
++
++* Tue Jul 18 2000 Nalin Dahyabhai <nalin@redhat.com>
++- add %%defattr (release 4)
++
++* Wed Jul 12 2000 Prospector <bugzilla@redhat.com>
++- automatic rebuild
++
++* Thu Jul 06 2000 Trond Eivind Glomsrød <teg@redhat.com>
++- use %%{_tmppath}
++- change application group (Applications/Internet doesn't seem
++  right to me)
++- added BuildRequires
++
++* Tue Apr 04 2000 Erik Troan <ewt@redhat.com>
++- initial packaging
