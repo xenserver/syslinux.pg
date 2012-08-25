@@ -1,0 +1,361 @@
+make sector size dynamic in extlinux
+
+From: Frediano Ziglio <frediano.ziglio@citrix.com>
+
+diff --git a/dos/syslinux.c b/dos/syslinux.c
+index fa4bf38..6cd36d0 100644
+--- a/dos/syslinux.c
++++ b/dos/syslinux.c
+@@ -723,7 +723,7 @@ int main(int argc, char *argv[])
+     /*
+      * Patch ldlinux.sys and the boot sector
+      */
+-    i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL);
++    i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL, SECTOR_SIZE);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /*
+diff --git a/extlinux/main.c b/extlinux/main.c
+index f0d8e11..e40b4d7 100644
+--- a/extlinux/main.c
++++ b/extlinux/main.c
+@@ -95,6 +95,18 @@ static uint64_t get_size(int devfd)
+ }
+ 
+ /*
++ * Get sector size
++ */
++static unsigned get_sector_size(int devfd)
++{
++    int size;
++
++    if (!ioctl(devfd, BLKSSZGET, &size))
++	return size;
++    return SECTOR_SIZE;
++}
++
++/*
+  * Get device geometry and partition offset
+  */
+ struct geometry_table {
+@@ -145,7 +157,7 @@ static const struct geometry_table standard_geometries[] = {
+     {0, {0, 0, 0, 0}}
+ };
+ 
+-int get_geometry(int devfd, uint64_t totalbytes, struct hd_geometry *geo)
++static int get_geometry(int devfd, uint64_t totalbytes, unsigned sector_size, struct hd_geometry *geo)
+ {
+     struct floppy_struct fd_str;
+     struct loop_info li;
+@@ -179,7 +191,7 @@ int get_geometry(int devfd, uint64_t totalbytes, struct hd_geometry *geo)
+ 
+     geo->heads = opt.heads ? : 64;
+     geo->sectors = opt.sectors ? : 32;
+-    geo->cylinders = totalbytes / (geo->heads * geo->sectors << SECTOR_SHIFT);
++    geo->cylinders = totalbytes / (geo->heads * geo->sectors * sector_size);
+     geo->start = 0;
+ 
+     if (!opt.sectors && !opt.heads) {
+@@ -193,11 +205,11 @@ int get_geometry(int devfd, uint64_t totalbytes, struct hd_geometry *geo)
+ ok:
+     /* If this is a loopback device, try to set the start */
+     if (!ioctl(devfd, LOOP_GET_STATUS64, &li64))
+-	geo->start = li64.lo_offset >> SECTOR_SHIFT;
++	geo->start = li64.lo_offset / sector_size;
+     else if (!ioctl(devfd, LOOP_GET_STATUS, &li))
+-	geo->start = (unsigned int)li.lo_offset >> SECTOR_SHIFT;
++	geo->start = (unsigned int)li.lo_offset / sector_size;
+     else if (!sysfs_get_offset(devfd, &geo->start)) {
+-	/* OK */
++	geo->start /= (sector_size / SECTOR_SIZE);
+     }
+ 
+     return rv;
+@@ -220,6 +232,7 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     struct fat_boot_sector *sbs;
+     char *dirpath, *subpath, *xdirpath;
+     int rv;
++    unsigned sector_size;
+ 
+     dirpath = realpath(dir, NULL);
+     if (!dirpath || stat(dir, &dirst)) {
+@@ -262,7 +275,8 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     dprintf("subpath = %s\n", subpath);
+ 
+     totalbytes = get_size(devfd);
+-    get_geometry(devfd, totalbytes, &geo);
++    sector_size = get_sector_size(devfd);
++    get_geometry(devfd, totalbytes, sector_size, &geo);
+ 
+     if (opt.heads)
+ 	geo.heads = opt.heads;
+@@ -276,7 +290,7 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+ 
+     sbs = (struct fat_boot_sector *)syslinux_bootsect;
+ 
+-    totalsectors = totalbytes >> SECTOR_SHIFT;
++    totalsectors = totalbytes / sector_size;
+     if (totalsectors >= 65536) {
+ 	set_16(&sbs->bsSectors, 0);
+     } else {
+@@ -284,7 +298,7 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     }
+     set_32(&sbs->bsHugeSectors, totalsectors);
+ 
+-    set_16(&sbs->bsBytesPerSec, SECTOR_SIZE);
++    set_16(&sbs->bsBytesPerSec, sector_size);
+     set_16(&sbs->bsSecPerTrack, geo.sectors);
+     set_16(&sbs->bsHeads, geo.heads);
+     set_32(&sbs->bsHiddenSecs, geo.start);
+@@ -292,11 +306,11 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     /* Construct the boot file map */
+ 
+     dprintf("directory inode = %lu\n", (unsigned long)dirst.st_ino);
+-    nsect = (boot_image_len + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
++    nsect = (boot_image_len + sector_size - 1) / sector_size;
+     nsect += 2;			/* Two sectors for the ADV */
+     sectp = alloca(sizeof(sector_t) * nsect);
+     if (fs_type == EXT2 || fs_type == VFAT || fs_type == NTFS) {
+-	if (sectmap(fd, sectp, nsect)) {
++	if (sectmap(fd, sectp, nsect, sector_size)) {
+ 		perror("bmap");
+ 		exit(1);
+ 	}
+@@ -312,7 +326,7 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+ 
+     /* Create the modified image in memory */
+     rv = syslinux_patch(sectp, nsect, opt.stupid_mode,
+-			opt.raid_mode, subpath, subvol);
++			opt.raid_mode, subpath, subvol, sector_size);
+ 
+     free(dirpath);
+     return rv;
+diff --git a/libinstaller/syslinux.h b/libinstaller/syslinux.h
+index 8b86f88..75ed451 100644
+--- a/libinstaller/syslinux.h
++++ b/libinstaller/syslinux.h
+@@ -49,6 +49,7 @@ const char *syslinux_check_bootsect(const void *bs, int *fs_type);
+ typedef uint64_t sector_t;
+ int syslinux_patch(const sector_t *sectors, int nsectors,
+ 		   int stupid, int raid_mode,
+-		   const char *subdir, const char *subvol);
++		   const char *subdir, const char *subvol,
++		   unsigned sector_size);
+ 
+ #endif
+diff --git a/libinstaller/syslxcom.c b/libinstaller/syslxcom.c
+index 57f13cd..95a7110 100644
+--- a/libinstaller/syslxcom.c
++++ b/libinstaller/syslxcom.c
+@@ -45,8 +45,6 @@ int fs_type;
+ # define dprintf(...) ((void)0)
+ #endif
+ 
+-#define SECTOR_SHIFT	9
+-
+ static void die(const char *msg)
+ {
+     fputs(msg, stderr);
+@@ -176,7 +174,7 @@ void set_attributes(int fd)
+ }
+ 
+ /* New FIEMAP based mapping */
+-static int sectmap_fie(int fd, sector_t *sectors, int nsectors)
++static int sectmap_fie(int fd, sector_t *sectors, int nsectors, unsigned sector_size)
+ {
+     struct fiemap *fm;
+     struct fiemap_extent *fe;
+@@ -193,7 +191,7 @@ static int sectmap_fie(int fd, sector_t *sectors, int nsectors)
+ 
+     memset(fm, 0, sizeof *fm);
+ 
+-    maplen = (uint64_t)nsectors << SECTOR_SHIFT;
++    maplen = (uint64_t)nsectors * sector_size;
+     if (maplen > (uint64_t)st.st_size)
+ 	maplen = st.st_size;
+ 
+@@ -217,12 +215,12 @@ static int sectmap_fie(int fd, sector_t *sectors, int nsectors)
+     for (i = 0; i < fm->fm_mapped_extents; i++) {
+ 	if (fe->fe_flags & FIEMAP_EXTENT_LAST) {
+ 	    /* If this is the *final* extent, pad the length */
+-	    fe->fe_length = (fe->fe_length + SECTOR_SIZE - 1)
+-		& ~(SECTOR_SIZE - 1);
++	    fe->fe_length = (fe->fe_length + sector_size - 1)
++		& ~(sector_size - 1);
+ 	}
+ 
+ 	if ((fe->fe_logical | fe->fe_physical| fe->fe_length) &
+-	    (SECTOR_SIZE - 1))
++	    (sector_size - 1))
+ 	    return -1;
+ 
+ 	if (fe->fe_flags & (FIEMAP_EXTENT_UNKNOWN|
+@@ -232,9 +230,9 @@ static int sectmap_fie(int fd, sector_t *sectors, int nsectors)
+ 			    FIEMAP_EXTENT_UNWRITTEN))
+ 	    return -1;
+ 
+-	secp = sectors + (fe->fe_logical >> SECTOR_SHIFT);
+-	sec  = fe->fe_physical >> SECTOR_SHIFT;
+-	nsec = fe->fe_length >> SECTOR_SHIFT;
++	secp = sectors + (fe->fe_logical / sector_size);
++	sec  = fe->fe_physical / sector_size;
++	nsec = fe->fe_length / sector_size;
+ 
+ 	while (nsec--) {
+ 	    if (secp >= esec)
+@@ -249,7 +247,7 @@ static int sectmap_fie(int fd, sector_t *sectors, int nsectors)
+ }
+ 
+ /* Legacy FIBMAP based mapping */
+-static int sectmap_fib(int fd, sector_t *sectors, int nsectors)
++static int sectmap_fib(int fd, sector_t *sectors, int nsectors, unsigned sector_size)
+ {
+     unsigned int blk, nblk;
+     unsigned int i;
+@@ -261,7 +259,9 @@ static int sectmap_fib(int fd, sector_t *sectors, int nsectors)
+ 	return -1;
+ 
+     /* Number of sectors per block */
+-    blksize >>= SECTOR_SHIFT;
++    blksize /= sector_size;
++    if (blksize == 0)
++	return -1;
+ 
+     nblk = 0;
+     while (nsectors) {
+@@ -283,12 +283,12 @@ static int sectmap_fib(int fd, sector_t *sectors, int nsectors)
+ /*
+  * Produce file map
+  */
+-int sectmap(int fd, sector_t *sectors, int nsectors)
++int sectmap(int fd, sector_t *sectors, int nsectors, unsigned sector_size)
+ {
+-    if (!sectmap_fie(fd, sectors, nsectors))
++    if (!sectmap_fie(fd, sectors, nsectors, sector_size))
+ 	return 0;
+ 
+-    return sectmap_fib(fd, sectors, nsectors);
++    return sectmap_fib(fd, sectors, nsectors, sector_size);
+ }
+ 
+ /*
+diff --git a/libinstaller/syslxcom.h b/libinstaller/syslxcom.h
+index 8b3b461..111b634 100644
+--- a/libinstaller/syslxcom.h
++++ b/libinstaller/syslxcom.h
+@@ -8,7 +8,7 @@ ssize_t xpread(int fd, void *buf, size_t count, off_t offset);
+ ssize_t xpwrite(int fd, const void *buf, size_t count, off_t offset);
+ void clear_attributes(int fd);
+ void set_attributes(int fd);
+-int sectmap(int fd, sector_t *sectors, int nsectors);
++int sectmap(int fd, sector_t *sectors, int nsectors, unsigned sector_size);
+ int syslinux_already_installed(int dev_fd);
+ 
+ #endif
+diff --git a/libinstaller/syslxmod.c b/libinstaller/syslxmod.c
+index c706f2c..be101f9 100644
+--- a/libinstaller/syslxmod.c
++++ b/libinstaller/syslxmod.c
+@@ -31,7 +31,8 @@
+  * Generate sector extents
+  */
+ static void generate_extents(struct syslinux_extent *ex, int nptrs,
+-			     const sector_t *sectp, int nsect)
++			     const sector_t *sectp, int nsect,
++			     unsigned sector_size)
+ {
+     uint32_t addr = 0x8000;	/* ldlinux.sys starts loading here */
+     uint32_t base;
+@@ -47,7 +48,7 @@ static void generate_extents(struct syslinux_extent *ex, int nptrs,
+ 	sect = *sectp++;
+ 
+ 	if (len) {
+-	    uint32_t xbytes = (len + 1) * SECTOR_SIZE;
++	    uint32_t xbytes = (len + 1) * sector_size;
+ 
+ 	    if (sect == lba + len && xbytes < 65536 &&
+ 		((addr ^ (base + xbytes - 1)) & 0xffff0000) == 0) {
+@@ -66,7 +67,7 @@ static void generate_extents(struct syslinux_extent *ex, int nptrs,
+ 	len  = 1;
+ 
+     next:
+-	addr += SECTOR_SIZE;
++	addr += sector_size;
+ 	nsect--;
+     }
+ 
+@@ -98,13 +99,14 @@ static inline void *ptr(void *img, uint16_t *offset_p)
+  */
+ int syslinux_patch(const sector_t *sectp, int nsectors,
+ 		   int stupid, int raid_mode,
+-		   const char *subdir, const char *subvol)
++		   const char *subdir, const char *subvol,
++		   unsigned sector_size)
+ {
+     struct patch_area *patcharea;
+     struct ext_patch_area *epa;
+     struct syslinux_extent *ex;
+     uint32_t *wp;
+-    int nsect = ((boot_image_len + SECTOR_SIZE - 1) >> SECTOR_SHIFT) + 2;
++    int nsect = ((boot_image_len + sector_size - 1) / sector_size) + 2;
+     uint32_t csum;
+     int i, dw, nptrs;
+     struct fat_boot_sector *sbs = (struct fat_boot_sector *)boot_sector;
+@@ -154,7 +156,7 @@ int syslinux_patch(const sector_t *sectp, int nsectors,
+     }
+ 
+     /* -1 for the pointer in the boot sector, -2 for the two ADVs */
+-    generate_extents(ex, nptrs, sectp, nsect-1-2);
++    generate_extents(ex, nptrs, sectp, nsect-1-2, sector_size);
+ 
+     /* ADV pointers */
+     advptrs = ptr(boot_image, &epa->advptroffset);
+diff --git a/linux/syslinux.c b/linux/syslinux.c
+index 4b13b7f..22983f9 100755
+--- a/linux/syslinux.c
++++ b/linux/syslinux.c
+@@ -444,7 +444,7 @@ int main(int argc, char *argv[])
+      */
+     ldlinux_sectors += 2; /* 2 ADV sectors */
+     sectors = calloc(ldlinux_sectors, sizeof *sectors);
+-    if (sectmap(fd, sectors, ldlinux_sectors)) {
++    if (sectmap(fd, sectors, ldlinux_sectors, SECTOR_SIZE)) {
+ 	perror("bmap");
+ 	exit(1);
+     }
+@@ -463,7 +463,7 @@ umount:
+      * Patch ldlinux.sys and the boot sector
+      */
+     i = syslinux_patch(sectors, ldlinux_sectors, opt.stupid_mode,
+-		       opt.raid_mode, subdir, NULL);
++		       opt.raid_mode, subdir, NULL, SECTOR_SIZE);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /*
+diff --git a/mtools/syslinux.c b/mtools/syslinux.c
+index c65021b..6f3550f 100755
+--- a/mtools/syslinux.c
++++ b/mtools/syslinux.c
+@@ -273,7 +273,7 @@ int main(int argc, char *argv[])
+ 
+     /* Patch ldlinux.sys and the boot sector */
+     i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode,
+-		       opt.directory, NULL);
++		       opt.directory, NULL, SECTOR_SIZE);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /* Write the now-patched first sectors of ldlinux.sys */
+diff --git a/win/syslinux.c b/win/syslinux.c
+index 669450e..cbf003f 100644
+--- a/win/syslinux.c
++++ b/win/syslinux.c
+@@ -432,7 +432,8 @@ map_done:
+     /*
+      * Patch ldlinux.sys and the boot sector
+      */
+-    syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL);
++    syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL,
++		   SECTOR_SIZE);
+ 
+     /*
+      * Rewrite the file

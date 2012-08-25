@@ -1,0 +1,22 @@
+commit a133909837092a1bba8b4a61bfb81d4f9ac3a97e
+Author: Frediano Ziglio <frediano.ziglio@citrix.com>
+Date:   Thu Aug 9 12:53:49 2012 +0100
+
+    Reduce size reducing a message
+    
+    Easy way to reduce code but actually I found the message is
+    readable at the same way as previous
+
+diff --git a/mbr/gptmbr.S b/mbr/gptmbr.S
+index f73b472..b0c11b9 100644
+--- a/mbr/gptmbr.S
++++ b/mbr/gptmbr.S
+@@ -289,7 +289,7 @@ inc64:
+ 
+ disk_error:
+ 	call	error
+-	.ascii	"Disk error on boot\r\n"
++	.ascii	"Disk error\r\n"
+ 
+ /*
+  * Print error messages.  This is invoked with "call", with the

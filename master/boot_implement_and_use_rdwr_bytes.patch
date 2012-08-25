@@ -1,0 +1,201 @@
+implement and use rdwr_bytes
+
+From: Frediano Ziglio <frediano.ziglio@citrix.com>
+
+diff --git a/core/fs/diskio.c b/core/fs/diskio.c
+index 6683816..7e58d6f 100644
+--- a/core/fs/diskio.c
++++ b/core/fs/diskio.c
+@@ -265,6 +265,80 @@ static int edd_rdwr_sectors(struct disk *disk, void *buf,
+     return done;
+ }
+ 
++#define rdwr_sectors0(buf, lba, count, is_write) \
++	disk->rdwr_sectors(disk, buf, lba, count, is_write)
++/*
++ * Read a range of bytes
++ */
++int rdwr_bytes(struct disk *disk, void *buf,
++	       bytes_t lba, size_t count, bool is_write)
++{
++    int done, res;
++    unsigned mask, before, len;
++    unsigned shift = disk->sector_shift;
++
++    dprintf("called rdwr_bytes from %llu for %u bytes\n", (unsigned long long) lba, (unsigned) count);
++
++    mask = disk->sector_size - 1;
++
++    /* aligned, fix count/lba */
++    if (((lba|count) & mask) == 0) {
++	return (rdwr_sectors0(buf, lba >> shift, count >> shift, is_write) << shift);
++    }
++
++    /* do the hard work */
++    done = 0;
++    if ((lba & mask) != 0) {
++	/* align start sector */
++	before = lba & mask;
++	len  = disk->sector_size - before;
++        if (len > count) len = count;
++	res = rdwr_sectors0(core_xfer_buf, lba >> shift, 1, 0);
++        if (!res) return done;
++	if (is_write) {
++            memcpy(core_xfer_buf + before, buf, len);
++	    res = rdwr_sectors0(core_xfer_buf, lba >> shift, 1, 1);
++            if (!res) return done;
++	} else {
++            memcpy(buf, core_xfer_buf + before, len);
++	}
++	buf   += len;
++	lba   += len;
++	count -= len;
++	done  += len;
++    }
++
++    /* read/write full sectors */
++    len = count >> shift;
++    if (len) {
++	res = rdwr_sectors0(buf, lba >> shift, len, is_write) << shift;
++	done += res;
++	len <<= shift;
++	if (res < len) return done;
++	lba   += len;
++	count -= len;
++	done  += len;
++	buf   += len;
++    }
++
++    /* last partial sector */
++    if (count) {
++	len  = count;
++	res = rdwr_sectors0(core_xfer_buf, lba >> shift, 1, 0);
++        if (!res) return done;
++	if (is_write) {
++            memcpy(core_xfer_buf, buf, len);
++	    res = rdwr_sectors0(core_xfer_buf, lba >> shift, 1, 1);
++            if (!res) return done;
++	} else {
++            memcpy(buf, core_xfer_buf, len);
++	}
++	done += len;
++    }
++
++    return done;
++}
++
+ struct edd_disk_params {
+     uint16_t  len;
+     uint16_t  flags;
+@@ -292,9 +366,7 @@ static inline bool is_power_of_2(uint32_t x)
+ 
+ void getoneblk(struct disk *disk, char *buf, block_t block, int block_size)
+ {
+-    int sec_per_block = block_size / disk->sector_size;
+-
+-    disk->rdwr_sectors(disk, buf, block * sec_per_block, sec_per_block, 0);
++    rdwr_bytes(disk, buf, (bytes_t)block * block_size, block_size, 0);
+ }
+ 
+ 
+@@ -373,6 +445,8 @@ struct disk *disk_init(uint8_t devno, bool cdrom, sector_t part_start,
+ 		    is_power_of_2(edd_params.sector_size))
+ 		    sector_size = edd_params.sector_size;
+ 	    }
++	    if (hard_max_transfer > (0x10000/sector_size))
++		hard_max_transfer = (0x10000/sector_size);
+ 	}
+ 
+     }
+diff --git a/core/fs/ext2/ext2.c b/core/fs/ext2/ext2.c
+index 716670c..bddde8d 100644
+--- a/core/fs/ext2/ext2.c
++++ b/core/fs/ext2/ext2.c
+@@ -274,7 +274,7 @@ static int ext2_fs_init(struct fs_info *fs)
+     struct cache *cs;
+ 
+     /* read the super block */
+-    disk->rdwr_sectors(disk, &sb, 2, 2, 0);
++    rdwr_bytes(disk, &sb, 2*512, 2*512, 0);
+ 
+     /* check if it is ext2, since we also support btrfs now */
+     if (sb.s_magic != EXT2_SUPER_MAGIC)
+diff --git a/core/fs/fat/fat.c b/core/fs/fat/fat.c
+index b08923c..3c7620e 100644
+--- a/core/fs/fat/fat.c
++++ b/core/fs/fat/fat.c
+@@ -731,7 +731,7 @@ static int vfat_fs_init(struct fs_info *fs)
+     fs->sector_size  = 1 << fs->sector_shift;
+     fs->block_size   = 1 << fs->block_shift;
+ 
+-    disk->rdwr_sectors(disk, &fat, 0, 1, 0);
++    rdwr_bytes(disk, &fat, 0, 512, 0);
+ 
+     /* XXX: Find better sanity checks... */
+     if (!fat.bxResSectors || !fat.bxFATs)
+diff --git a/core/fs/iso9660/iso9660.c b/core/fs/iso9660/iso9660.c
+index 3cd3ac4..60b3b55 100644
+--- a/core/fs/iso9660/iso9660.c
++++ b/core/fs/iso9660/iso9660.c
+@@ -251,7 +251,7 @@ static int iso_fs_init(struct fs_info *fs)
+     char pvd[2048];		/* Primary Volume Descriptor */
+     uint32_t pvd_lba;
+     struct disk *disk = fs->fs_dev->disk;
+-    int blktosec;
++    int blkshift;
+ 
+     sbi = malloc(sizeof(*sbi));
+     if (!sbi) {
+@@ -268,14 +268,14 @@ static int iso_fs_init(struct fs_info *fs)
+     fs->block_shift  = 11;	/* A CD-ROM block is always 2K */
+     fs->sector_size  = 1 << fs->sector_shift;
+     fs->block_size   = 1 << fs->block_shift;
+-    blktosec = fs->block_shift - fs->sector_shift;
++    blkshift = fs->block_shift;
+ 
+     pvd_lba = iso_boot_info.pvd;
+     if (!pvd_lba)
+ 	pvd_lba = 16;		/* Default if not otherwise defined */
+ 
+-    disk->rdwr_sectors(disk, pvd, (sector_t)pvd_lba << blktosec,
+-		       1 << blktosec, false);
++    rdwr_bytes(disk, pvd, (bytes_t)pvd_lba << blkshift,
++		       1 << blkshift, false);
+     memcpy(&sbi->root, pvd + ROOT_DIR_OFFSET, sizeof(sbi->root));
+ 
+     /* Initialize the cache */
+diff --git a/core/fs/ntfs/ntfs.c b/core/fs/ntfs/ntfs.c
+index 500d0fd..f6c8e24 100644
+--- a/core/fs/ntfs/ntfs.c
++++ b/core/fs/ntfs/ntfs.c
+@@ -1311,8 +1311,8 @@ static int ntfs_fs_init(struct fs_info *fs)
+ 
+     dprintf("in %s()\n", __func__);
+ 
+-    read_count = disk->rdwr_sectors(disk, &ntfs, 0, 1, 0);
+-    if (!read_count)
++    read_count = rdwr_bytes(disk, &ntfs, 0, 512, 0);
++    if (read_count != 512)
+         return -1;
+ 
+     if (!ntfs_check_sb_fields(&ntfs))
+diff --git a/core/include/disk.h b/core/include/disk.h
+index ac23e92..f0a3fa8 100644
+--- a/core/include/disk.h
++++ b/core/include/disk.h
+@@ -7,6 +7,7 @@
+ 
+ typedef uint64_t sector_t;
+ typedef uint64_t block_t;
++typedef uint64_t bytes_t;
+ 
+ /*
+  * struct disk: contains the information about a specific disk and also
+@@ -29,6 +30,7 @@ struct disk {
+ 
+ extern void read_sectors(char *, sector_t, int);
+ extern void getoneblk(struct disk *, char *, block_t, int);
++extern int rdwr_bytes(struct disk *, void *, bytes_t, size_t, bool);
+ 
+ /* diskio.c */
+ struct disk *disk_init(uint8_t, bool, sector_t, uint16_t, uint16_t, uint32_t);

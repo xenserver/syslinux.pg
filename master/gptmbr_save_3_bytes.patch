@@ -1,0 +1,55 @@
+commit 4ae6ddabec993ab7916cbf7d19717a634ea326c5
+Author: Frediano Ziglio <frediano.ziglio@citrix.com>
+Date:   Thu Aug 9 10:02:56 2012 +0100
+
+    Recover 3 bytes avoid a call
+    
+    after read_sector %edx:%eax are unused or incremented so increment
+    always at end gaining 3 bytes
+
+diff --git a/mbr/gptmbr.S b/mbr/gptmbr.S
+index ae0549f..ef2235d 100644
+--- a/mbr/gptmbr.S
++++ b/mbr/gptmbr.S
+@@ -142,7 +142,6 @@ next:
+ 	pushw	%bx
+ get_ptab:
+ 	call	read_sector
+-	call	inc64
+ 	loopw	get_ptab
+ 
+ 	/* Find the boot partition */
+@@ -240,16 +239,9 @@ saturate_stosl:
+ 	ret
+ 
+ /*
+- * Increment %edx:%eax
+- */
+-inc64:
+-	addl	$1,%eax
+-	adcl	$0,%edx
+-	ret
+-
+-/*
+  * read_sector: read a single sector pointed to by %edx:%eax to
+  * %es:%bx.  CF is set on error.  All registers saved.
++ * %edx:%eax and %es:%bx are incremented to read next sector
+  */
+ read_sector:
+ 	pushal
+@@ -282,6 +274,15 @@ read_common:
+ 	popal
+ 	jc	disk_error
+ 	addb	$2, %bh		/* bx += 512: point to the next buffer */
++
++	/* fall through and increment sector number */
++
++/*
++ * Increment %edx:%eax
++ */
++inc64:
++	addl	$1,%eax
++	adcl	$0,%edx
+ 	ret
+ 
+ disk_error:

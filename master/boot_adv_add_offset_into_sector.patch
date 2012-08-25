@@ -1,0 +1,271 @@
+fix adv handling adding offset into sector
+
+From: Frediano Ziglio <frediano.ziglio@citrix.com>
+
+diff --git a/core/adv.inc b/core/adv.inc
+index 4750cea..88ea906 100644
+--- a/core/adv.inc
++++ b/core/adv.inc
+@@ -356,13 +356,15 @@ adv_read_write:
+ 
+ 		mov eax,[ADVSec0]
+ 		mov edx,[ADVSec0+4]
++		mov di,[ADVOff0]
+ 		mov bx,adv0
+-;		call .doone
++		call .doone
+ 
+ 		mov eax,[ADVSec1]
+ 		mov edx,[ADVSec1+4]
++		mov di,[ADVOff1]
+ 		mov bx,adv1
+-;		call .doone
++		call .doone
+ 
+ 		popad
+ 		ret
+@@ -384,16 +386,18 @@ adv_read_write:
+ 		push ds
+ 		push es
+ 		mov si, bx
+-		xor di, di
+ 		push es
+ 		pop ds
+ 		push 2000h
+ 		pop es
+-		mov cx, 256
+-		rep movsw
+-		mov cx, 256 * 7
++		push di
++		xor di, di
++		mov cx, 256 * 8
+ 		xor ax, ax
+ 		rep stosw
++		pop di
++		mov cx, 256
++		rep movsw
+ 		pop es
+ 		pop ds
+ 		pop ax
+@@ -421,8 +425,8 @@ adv_read_write:
+ 		; copy it back
+ 		pusha
+ 		push ds
++		mov si, di
+ 		mov di, bx
+-		xor si, si
+ 		push 2000h
+ 		pop ds
+ 		mov cx, 256
+@@ -537,6 +541,8 @@ adv_read_write:
+ 		alignz 8
+ ADVSec0		dq 0			; Not specified
+ ADVSec1		dq 0			; Not specified
++ADVOff0		dw 0
++ADVOff1		dw 0
+ ADVDrive	db -1			; No ADV defined
+ ADVCHSInfo	db -1			; We have CHS info for this drive
+ 
+diff --git a/dos/syslinux.c b/dos/syslinux.c
+index 6cd36d0..4b518c7 100644
+--- a/dos/syslinux.c
++++ b/dos/syslinux.c
+@@ -723,7 +723,7 @@ int main(int argc, char *argv[])
+     /*
+      * Patch ldlinux.sys and the boot sector
+      */
+-    i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL, SECTOR_SIZE);
++    i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL, SECTOR_SIZE, NULL);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /*
+diff --git a/extlinux/main.c b/extlinux/main.c
+index 61eaad1..78fffae 100644
+--- a/extlinux/main.c
++++ b/extlinux/main.c
+@@ -228,11 +228,12 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     struct hd_geometry geo;
+     sector_t *sectp;
+     uint64_t totalbytes, totalsectors;
+-    int nsect;
++    int nsect, nsect_full;
+     struct fat_boot_sector *sbs;
+     char *dirpath, *subpath, *xdirpath;
+     int rv;
+     unsigned sector_size;
++    uint16_t adv_offsets[2] = { 0, 0 };
+ 
+     dirpath = realpath(dir, NULL);
+     if (!dirpath || stat(dir, &dirst)) {
+@@ -308,13 +309,17 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+ 
+     dprintf("directory inode = %lu\n", (unsigned long)dirst.st_ino);
+     nsect = (boot_image_len + sector_size - 1) / sector_size;
+-    nsect += 2;			/* Two sectors for the ADV */
+-    sectp = alloca(sizeof(sector_t) * nsect);
++    nsect_full = (boot_image_len + 2 * ADV_SIZE + sector_size - 1) / sector_size;
++    sectp = alloca(sizeof(sector_t) * (nsect+2));
+     if (fs_type == EXT2 || fs_type == VFAT || fs_type == NTFS) {
+-	if (sectmap(fd, sectp, nsect, sector_size)) {
++	if (sectmap(fd, sectp, nsect_full, sector_size)) {
+ 		perror("bmap");
+ 		exit(1);
+ 	}
++	sectp[nsect+1] = sectp[(boot_image_len + 1 * ADV_SIZE) / sector_size];
++	sectp[nsect+0] = sectp[(boot_image_len + 0 * ADV_SIZE) / sector_size];
++	adv_offsets[1] = (boot_image_len + 1 * ADV_SIZE) % sector_size;
++	adv_offsets[0] = (boot_image_len + 0 * ADV_SIZE) % sector_size;
+     } else if (fs_type == BTRFS) {
+ 	int i;
+ 	sector_t *sp = sectp;
+@@ -327,8 +332,9 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     }
+ 
+     /* Create the modified image in memory */
+-    rv = syslinux_patch(sectp, nsect, opt.stupid_mode,
+-			opt.raid_mode, subpath, subvol, sector_size);
++    rv = syslinux_patch(sectp, nsect + 2, opt.stupid_mode,
++			opt.raid_mode, subpath, subvol, sector_size,
++			adv_offsets);
+ 
+     free(dirpath);
+     return rv;
+@@ -412,33 +418,12 @@ int install_bootblock(int fd, const char *device)
+     return 0;
+ }
+ 
+-static int inc_and_align(int fd, unsigned *pos, unsigned bytes, unsigned align)
+-{
+-    char buf[512];
+-    unsigned left;
+-
+-    *pos += bytes;
+-    left = *pos % align;
+-    left = (align - left) % align;
+-    while (left > 0) {
+-	unsigned l = left > sizeof(buf) ? sizeof(buf) : left;
+-	memset(buf, 0, sizeof(buf));
+-	if (xpwrite(fd, buf, l, *pos) != l)
+-	    return 0;
+-	left -= l;
+-	*pos += l;
+-    }
+-    return 1;
+-}
+-
+ static int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
+ {
+     char *file, *oldfile;
+     int fd = -1, dirfd = -1;
+     int modbytes;
+     int r1, r2;
+-    unsigned sector_size;
+-    unsigned pos;
+ 
+     r1 = asprintf(&file, "%s%sldlinux.sys",
+ 		  path, path[0] && path[strlen(path) - 1] == '/' ? "" : "/");
+@@ -473,17 +458,10 @@ static int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
+ 	goto bail;
+     }
+ 
+-    /* FIXME copied above */
+-    sector_size = fs_type == BTRFS ? SECTOR_SIZE : get_sector_size(devfd);
+-
+     /* Write it the first time */
+-    pos = 0;
+-    if (xpwrite(fd, boot_image, boot_image_len, pos) != boot_image_len ||
+-        !inc_and_align(fd, &pos, boot_image_len, sector_size) ||
+-	xpwrite(fd, syslinux_adv, ADV_SIZE, pos) != ADV_SIZE ||
+-        !inc_and_align(fd, &pos, ADV_SIZE, sector_size) ||
+-	xpwrite(fd, syslinux_adv + ADV_SIZE, ADV_SIZE, pos) != ADV_SIZE ||
+-        !inc_and_align(fd, &pos, ADV_SIZE, sector_size)) {
++    if (xpwrite(fd, boot_image, boot_image_len, 0) != boot_image_len ||
++	xpwrite(fd, syslinux_adv, 2 * ADV_SIZE,
++		boot_image_len) != 2 * ADV_SIZE) {
+ 	fprintf(stderr, "%s: write failure on %s\n", program, file);
+ 	goto bail;
+     }
+diff --git a/libinstaller/syslinux.h b/libinstaller/syslinux.h
+index 75ed451..d426839 100644
+--- a/libinstaller/syslinux.h
++++ b/libinstaller/syslinux.h
+@@ -50,6 +50,6 @@ typedef uint64_t sector_t;
+ int syslinux_patch(const sector_t *sectors, int nsectors,
+ 		   int stupid, int raid_mode,
+ 		   const char *subdir, const char *subvol,
+-		   unsigned sector_size);
++		   unsigned sector_size, uint16_t *adv_offsets);
+ 
+ #endif
+diff --git a/libinstaller/syslxmod.c b/libinstaller/syslxmod.c
+index be101f9..222adb7 100644
+--- a/libinstaller/syslxmod.c
++++ b/libinstaller/syslxmod.c
+@@ -100,7 +100,7 @@ static inline void *ptr(void *img, uint16_t *offset_p)
+ int syslinux_patch(const sector_t *sectp, int nsectors,
+ 		   int stupid, int raid_mode,
+ 		   const char *subdir, const char *subvol,
+-		   unsigned sector_size)
++		   unsigned sector_size, uint16_t *adv_offsets)
+ {
+     struct patch_area *patcharea;
+     struct ext_patch_area *epa;
+@@ -111,6 +111,7 @@ int syslinux_patch(const sector_t *sectp, int nsectors,
+     int i, dw, nptrs;
+     struct fat_boot_sector *sbs = (struct fat_boot_sector *)boot_sector;
+     uint64_t *advptrs;
++    uint16_t *advoffs;
+ 
+     if (nsectors < nsect)
+ 	return -1;		/* The actual file is too small for content */
+@@ -162,6 +163,11 @@ int syslinux_patch(const sector_t *sectp, int nsectors,
+     advptrs = ptr(boot_image, &epa->advptroffset);
+     set_64_sl(&advptrs[0], sectp[nsect-1-2]);
+     set_64_sl(&advptrs[1], sectp[nsect-1-1]);
++    advoffs = (uint16_t *) (advptrs+2);
++    if (adv_offsets) {
++	set_16_sl(&advoffs[0], adv_offsets[0]);
++	set_16_sl(&advoffs[1], adv_offsets[1]);
++    }
+ 
+     /* Poke in the base directory path */
+     if (subdir) {
+diff --git a/linux/syslinux.c b/linux/syslinux.c
+index 22983f9..7476be1 100755
+--- a/linux/syslinux.c
++++ b/linux/syslinux.c
+@@ -463,7 +463,7 @@ umount:
+      * Patch ldlinux.sys and the boot sector
+      */
+     i = syslinux_patch(sectors, ldlinux_sectors, opt.stupid_mode,
+-		       opt.raid_mode, subdir, NULL, SECTOR_SIZE);
++		       opt.raid_mode, subdir, NULL, SECTOR_SIZE, NULL);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /*
+diff --git a/mtools/syslinux.c b/mtools/syslinux.c
+index 6f3550f..a3c59cc 100755
+--- a/mtools/syslinux.c
++++ b/mtools/syslinux.c
+@@ -273,7 +273,7 @@ int main(int argc, char *argv[])
+ 
+     /* Patch ldlinux.sys and the boot sector */
+     i = syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode,
+-		       opt.directory, NULL, SECTOR_SIZE);
++		       opt.directory, NULL, SECTOR_SIZE, NULL);
+     patch_sectors = (i + SECTOR_SIZE - 1) >> SECTOR_SHIFT;
+ 
+     /* Write the now-patched first sectors of ldlinux.sys */
+diff --git a/win/syslinux.c b/win/syslinux.c
+index cbf003f..1cc8a4e 100644
+--- a/win/syslinux.c
++++ b/win/syslinux.c
+@@ -433,7 +433,7 @@ map_done:
+      * Patch ldlinux.sys and the boot sector
+      */
+     syslinux_patch(sectors, nsectors, opt.stupid_mode, opt.raid_mode, opt.directory, NULL,
+-		   SECTOR_SIZE);
++		   SECTOR_SIZE, NULL);
+ 
+     /*
+      * Rewrite the file

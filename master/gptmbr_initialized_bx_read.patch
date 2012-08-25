@@ -1,0 +1,47 @@
+commit 1b06406a4f358b5eaab4b5d30fb19c15ccd34a93
+Author: Frediano Ziglio <frediano.ziglio@citrix.com>
+Date:   Thu Aug 9 12:06:06 2012 +0100
+
+    Save some bytes adding a function to set bx before read_sector
+    
+    Mostly of the time bx was set as phdr before calling read_sector
+    so add a specific function to set %bx and call read_sector
+    gaining 2 bytes
+
+diff --git a/mbr/gptmbr.S b/mbr/gptmbr.S
+index ef2235d..f73b472 100644
+--- a/mbr/gptmbr.S
++++ b/mbr/gptmbr.S
+@@ -118,9 +118,7 @@ next:
+ 	xorl	%eax,%eax
+ 	cltd
+ 	incw	%ax		/* %edx:%eax = 1 */
+-	movw	$phdr, %bx
+-	pushw	%bx		/* -8(%bp) phdr == bootsect */
+-	call	read_sector
++	call	read_sector_phdr
+ 
+ 	/* Number of partition sectors */
+ 	/* We assume the partition table is 32K or less, and that
+@@ -215,8 +213,7 @@ found_part:
+ boot:
+ 	movl	(32+20)(%si),%eax
+ 	movl	(36+20)(%si),%edx
+-	popw	%bx
+-	call	read_sector
++	call	read_sector_phdr
+ 	cmpw	$0xaa55, -2(%bx)
+ 	jne	missing_os	/* Not a valid boot sector */
+ 	movw	%bp, %sp	/* driveno == bootsec-6 */
+@@ -238,6 +235,11 @@ saturate_stosl:
+ 1:	stosl
+ 	ret
+ 
++read_sector_phdr:
++	movw	$phdr, %bx
++
++	/* fall through and read sector */
++
+ /*
+  * read_sector: read a single sector pointed to by %edx:%eax to
+  * %es:%bx.  CF is set on error.  All registers saved.
