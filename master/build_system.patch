@@ -240,10 +240,10 @@ index 0000000..819bf0f
 +0f[F1-Standard] [F2-Advanced]05
 diff --git a/xenmk/syslinux.spec.in b/xenmk/syslinux.spec.in
 new file mode 100644
-index 0000000..db729b8
+index 0000000..b58cee7
 --- /dev/null
 +++ b/xenmk/syslinux.spec.in
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,280 @@
 +Summary: Simple kernel loader which boots from a FAT filesystem
 +Name: syslinux
 +Version: @SYSLINUX_VERSION@
@@ -262,6 +262,7 @@ index 0000000..db729b8
 +%ifarch x86_64
 +Requires: libc.so.6()(64bit)
 +%endif
++BuildRequires: binutils220 binutils220-ld gcc44
 +Obsoletes: syslinux-devel < %{version}-%{release}
 +Provides: syslinux-devel
 +
@@ -281,7 +282,11 @@ index 0000000..db729b8
 +
 +%build
 +
-+# redirect some command in order to make it work
++# HACK: redirect some command in order to make it compile
++# this is required as distro default is not able to compile
++# and link correctly syslinux
++# Note that to remove this hack if you update distro you
++# should remove BuildRequires line
 +rm -rf fakedir
 +mkdir fakedir
 +cd fakedir
