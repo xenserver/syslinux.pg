@@ -12,3 +12,4 @@ boot_add_additional_checks_to_ext2_loader.patch
 boot_attempt_to_fix_adv.patch
 boot_fix_adv_sector_size.patch
 boot_adv_add_offset_into_sector.patch
+new_adv_fix_rmw.patch
