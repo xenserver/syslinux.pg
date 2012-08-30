@@ -1,63 +1,124 @@
-fix adv handling adding offset into sector
+Fix ADV in adv.inc
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
+Add offset to adv sectors.
+If sector seize is greater than adv size you need an additional
+offset to specify which sector part contains the information.
 
 diff --git a/core/adv.inc b/core/adv.inc
-index 4750cea..88ea906 100644
+index 0b45a6c..a714800 100644
 --- a/core/adv.inc
 +++ b/core/adv.inc
-@@ -356,13 +356,15 @@ adv_read_write:
+@@ -356,11 +356,13 @@ adv_read_write:
  
  		mov eax,[ADVSec0]
  		mov edx,[ADVSec0+4]
 +		mov di,[ADVOff0]
  		mov bx,adv0
--;		call .doone
-+		call .doone
+ 		call .doone
  
  		mov eax,[ADVSec1]
  		mov edx,[ADVSec1+4]
 +		mov di,[ADVOff1]
  		mov bx,adv1
--;		call .doone
-+		call .doone
+ 		call .doone
  
- 		popad
- 		ret
-@@ -384,16 +386,18 @@ adv_read_write:
- 		push ds
- 		push es
- 		mov si, bx
--		xor di, di
- 		push es
- 		pop ds
- 		push 2000h
- 		pop es
--		mov cx, 256
--		rep movsw
--		mov cx, 256 * 7
+@@ -371,18 +373,66 @@ adv_read_write:
+ 		push si
+ 		jmp si
+ 
++		extern xfer_buf_seg
+ .ebios:
++		pusha
++		sub sp,1ch
++		push 1eh
++		mov si,sp
++		mov ah,48h			; EDD get drive parameters
++		mov dl,[ADVDrive]
++		push ds
++		push ss
++		pop ds
++		mov word [si+18h], 512
++		int 13h
++		mov ax, [si+18h]
++		pop ds
++		mov [ADVSsz], ax
++		add sp,1eh
++		popa
++
+ 		mov cx,adv_retries
+ .eb_retry:
+ 		; Form DAPA on stack
++		pushad
+ 		push edx
+ 		push eax
+-		push es
+-		push bx
++		push xfer_buf_seg
++		push 0
+ 		push word 1			; Sector count
+ 		push word 16			; DAPA size
++
++		; check if we must do a RMW operation
++		cmp word [ADVSsz], 512
++		je .no_rmw
++		cmp byte [ADVOp], 2
++		je .no_rmw
++
++		mov si,sp
++		mov dl,[ADVDrive]
++		mov ax,4200h
++		push ds
++		push ss
++		pop ds
++		int 13h
++		pop ds
++		jc .eb_error_stack
++
++.no_rmw:
++		; modify sector with ADV
++		cld
++		push es
++		push xfer_buf_seg
++		pop es
 +		push di
-+		xor di, di
-+		mov cx, 256 * 8
- 		xor ax, ax
- 		rep stosw
-+		pop di
++		mov si, bx
 +		mov cx, 256
 +		rep movsw
- 		pop es
++		pop di
++		pop es
++
+ 		mov si,sp
+-		pushad
+ 		mov dl,[ADVDrive]
+ 		mov ax,4000h
+ 		or ah,[ADVOp]
+@@ -391,9 +441,24 @@ adv_read_write:
  		pop ds
- 		pop ax
-@@ -421,8 +425,8 @@ adv_read_write:
- 		; copy it back
- 		pusha
- 		push ds
+ 		int 13h
+ 		pop ds
+-		popad
++.eb_error_stack:
+ 		lea sp,[si+16]			; Remove DAPA
++
++		popad
+ 		jc .eb_error
++
++		; copy it back
++		pusha
++		push ds
 +		mov si, di
- 		mov di, bx
--		xor si, si
- 		push 2000h
- 		pop ds
- 		mov cx, 256
-@@ -537,6 +541,8 @@ adv_read_write:
++		mov di, bx
++		push xfer_buf_seg
++		pop ds
++		mov cx, 256
++		rep movsw
++		pop ds
++		popa
++
+ 		pop si
+ 		ret
+ .eb_error:
+@@ -500,8 +565,11 @@ adv_read_write:
  		alignz 8
  ADVSec0		dq 0			; Not specified
  ADVSec1		dq 0			; Not specified
@@ -65,7 +126,10 @@ index 4750cea..88ea906 100644
 +ADVOff1		dw 0
  ADVDrive	db -1			; No ADV defined
  ADVCHSInfo	db -1			; We have CHS info for this drive
++ADVSsz		dw 512			; sector size
  
+ 		section .bss16
+ ADVOp		resb 1
 diff --git a/dos/syslinux.c b/dos/syslinux.c
 index 6cd36d0..4b518c7 100644
 --- a/dos/syslinux.c
@@ -80,7 +144,7 @@ index 6cd36d0..4b518c7 100644
  
      /*
 diff --git a/extlinux/main.c b/extlinux/main.c
-index 61eaad1..78fffae 100644
+index e40b4d7..78fffae 100644
 --- a/extlinux/main.c
 +++ b/extlinux/main.c
 @@ -228,11 +228,12 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
@@ -97,7 +161,17 @@ index 61eaad1..78fffae 100644
  
      dirpath = realpath(dir, NULL);
      if (!dirpath || stat(dir, &dirst)) {
-@@ -308,13 +309,17 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+@@ -275,7 +276,8 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+     dprintf("subpath = %s\n", subpath);
+ 
+     totalbytes = get_size(devfd);
+-    sector_size = get_sector_size(devfd);
++    /* FIXME support greater sector sizes for BTRFS */
++    sector_size = fs_type == BTRFS ? SECTOR_SIZE : get_sector_size(devfd);
+     get_geometry(devfd, totalbytes, sector_size, &geo);
+ 
+     if (opt.heads)
+@@ -307,17 +309,22 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
  
      dprintf("directory inode = %lu\n", (unsigned long)dirst.st_ino);
      nsect = (boot_image_len + sector_size - 1) / sector_size;
@@ -118,7 +192,12 @@ index 61eaad1..78fffae 100644
      } else if (fs_type == BTRFS) {
  	int i;
  	sector_t *sp = sectp;
-@@ -327,8 +332,9 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
+ 
++// FIXME ??
+ 	for (i = 0; i < nsect - 2; i++)
+ 	    *sp++ = BTRFS_EXTLINUX_OFFSET/SECTOR_SIZE + i;
+ 	for (i = 0; i < 2; i++)
+@@ -325,8 +332,9 @@ static int patch_file_and_bootblock(int fd, const char *dir, int devfd)
      }
  
      /* Create the modified image in memory */
@@ -130,61 +209,15 @@ index 61eaad1..78fffae 100644
  
      free(dirpath);
      return rv;
-@@ -412,33 +418,12 @@ int install_bootblock(int fd, const char *device)
+@@ -410,7 +418,7 @@ int install_bootblock(int fd, const char *device)
      return 0;
  }
  
--static int inc_and_align(int fd, unsigned *pos, unsigned bytes, unsigned align)
--{
--    char buf[512];
--    unsigned left;
--
--    *pos += bytes;
--    left = *pos % align;
--    left = (align - left) % align;
--    while (left > 0) {
--	unsigned l = left > sizeof(buf) ? sizeof(buf) : left;
--	memset(buf, 0, sizeof(buf));
--	if (xpwrite(fd, buf, l, *pos) != l)
--	    return 0;
--	left -= l;
--	*pos += l;
--    }
--    return 1;
--}
--
- static int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
+-int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
++static int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
  {
      char *file, *oldfile;
      int fd = -1, dirfd = -1;
-     int modbytes;
-     int r1, r2;
--    unsigned sector_size;
--    unsigned pos;
- 
-     r1 = asprintf(&file, "%s%sldlinux.sys",
- 		  path, path[0] && path[strlen(path) - 1] == '/' ? "" : "/");
-@@ -473,17 +458,10 @@ static int ext2_fat_install_file(const char *path, int devfd, struct stat *rst)
- 	goto bail;
-     }
- 
--    /* FIXME copied above */
--    sector_size = fs_type == BTRFS ? SECTOR_SIZE : get_sector_size(devfd);
--
-     /* Write it the first time */
--    pos = 0;
--    if (xpwrite(fd, boot_image, boot_image_len, pos) != boot_image_len ||
--        !inc_and_align(fd, &pos, boot_image_len, sector_size) ||
--	xpwrite(fd, syslinux_adv, ADV_SIZE, pos) != ADV_SIZE ||
--        !inc_and_align(fd, &pos, ADV_SIZE, sector_size) ||
--	xpwrite(fd, syslinux_adv + ADV_SIZE, ADV_SIZE, pos) != ADV_SIZE ||
--        !inc_and_align(fd, &pos, ADV_SIZE, sector_size)) {
-+    if (xpwrite(fd, boot_image, boot_image_len, 0) != boot_image_len ||
-+	xpwrite(fd, syslinux_adv, 2 * ADV_SIZE,
-+		boot_image_len) != 2 * ADV_SIZE) {
- 	fprintf(stderr, "%s: write failure on %s\n", program, file);
- 	goto bail;
-     }
 diff --git a/libinstaller/syslinux.h b/libinstaller/syslinux.h
 index 75ed451..d426839 100644
 --- a/libinstaller/syslinux.h
