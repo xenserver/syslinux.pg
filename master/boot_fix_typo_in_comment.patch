@@ -1,6 +1,6 @@
-fix typo in comment
+Fix typo in comment
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/com32/mboot/mboot.c b/com32/mboot/mboot.c
 index 35450e0..10e6701 100644

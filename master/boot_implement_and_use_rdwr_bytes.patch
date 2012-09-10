@@ -1,6 +1,10 @@
-implement and use rdwr_bytes
+Implement and use rdwr_bytes
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
+Instead of assuming that sector size is always 512 add a function that take
+byte offsets instead of number of sectors and call it when needed a specific
+range of bytes (for instance to read partition headers).
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/core/fs/diskio.c b/core/fs/diskio.c
 index 6683816..7e58d6f 100644

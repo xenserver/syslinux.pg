@@ -1,6 +1,6 @@
-add additional checks to ext2 loader
+Add additional checks to ext2 loader
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/core/fs/ext2/ext2.c b/core/fs/ext2/ext2.c
 index bddde8d..8f0f2a4 100644

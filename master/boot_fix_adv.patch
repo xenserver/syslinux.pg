@@ -1,8 +1,13 @@
 Fix ADV in adv.inc
 
 Add offset to adv sectors.
-If sector seize is greater than adv size you need an additional
-offset to specify which sector part contains the information.
+If sector size is greater than adv size you need an additional offset
+to specify which sector part contains the information.
+
+This patch does not support BTRFS (that will work only using 512 as sector
+size).
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/core/adv.inc b/core/adv.inc
 index 0b45a6c..a714800 100644

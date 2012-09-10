@@ -1,7 +1,9 @@
-make some functions static
+Make some functions static
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
-remove unused NADV define
+Limit some function visibility in extlinux.
+Also reamore an unused NADV define.
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/extlinux/main.c b/extlinux/main.c
 index 73f3fbe..f0d8e11 100644

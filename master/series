@@ -1,5 +1,7 @@
 build_system.patch
 hybrid_compile_fix.patch
+boot_fix_typo_in_comment.patch
+boot_add_additional_checks_to_ext2_loader.patch
 gptmbr_save_3_bytes.patch
 gptmbr_initialized_bx_read.patch
 gptmbr_reduce_message.patch
@@ -7,6 +9,4 @@ gptmbr_big_sectors.patch
 boot_static.patch
 boot_dynamic_sector.patch
 boot_implement_and_use_rdwr_bytes.patch
-boot_fix_typo_in_comment.patch
-boot_add_additional_checks_to_ext2_loader.patch
 boot_fix_adv.patch

@@ -1,6 +1,10 @@
-make sector size dynamic in extlinux
+Make sector size dynamic in extlinux
 
-From: Frediano Ziglio <frediano.ziglio@citrix.com>
+Instead of using SECTOR_SIZE as a constant everywhere pass the sector size
+to syslinux_patch.
+This patch compute read sector size only in extlinux.
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/dos/syslinux.c b/dos/syslinux.c
 index fa4bf38..6cd36d0 100644

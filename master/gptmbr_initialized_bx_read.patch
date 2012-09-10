@@ -1,12 +1,10 @@
-commit 1b06406a4f358b5eaab4b5d30fb19c15ccd34a93
-Author: Frediano Ziglio <frediano.ziglio@citrix.com>
-Date:   Thu Aug 9 12:06:06 2012 +0100
-
-    Save some bytes adding a function to set bx before read_sector
+Save some bytes adding a function to set bx before read_sector
     
-    Mostly of the time bx was set as phdr before calling read_sector
-    so add a specific function to set %bx and call read_sector
-    gaining 2 bytes
+Mostly of the time bx was set as phdr before calling read_sector
+so add a specific function to set %bx and call read_sector
+gaining 2 bytes
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/mbr/gptmbr.S b/mbr/gptmbr.S
 index ef2235d..f73b472 100644

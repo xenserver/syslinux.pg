@@ -1,14 +1,12 @@
-commit d26e8dd4ae2e1a0aa5b814b86739537c04727bfc
-Author: Frediano Ziglio <frediano.ziglio@citrix.com>
-Date:   Thu Aug 9 10:45:19 2012 +0100
-
-    Support sectors >512
+Support sectors >512
     
-    If EBIOS is detected for this drive it tries to read sector size and
-    use it. If error or no EBIOS 512 is assumed.
-    Buffer to read sector size is always allocated into the stack.
-    CHS informations are not readed as not needed and save space not
-    restoring %dl for drive number.
+If EBIOS is detected for this drive it tries to read sector size and
+use it. If error or no EBIOS 512 is assumed.
+Buffer to read sector size is always allocated into the stack.
+CHS informations are not readed as not needed and save space not
+restoring %dl for drive number.
+
+Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/mbr/gptmbr.S b/mbr/gptmbr.S
 index b0c11b9..88d2809 100644
