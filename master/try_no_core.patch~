@@ -1,0 +1,69 @@
+diff --git a/core/adv.inc b/core/adv.inc
+index a714800..a0c48250 100644
+--- a/core/adv.inc
++++ b/core/adv.inc
+@@ -351,6 +351,32 @@ adv_read_write:
+ 		jne .noedd
+ 		test cl,1
+ 		jz .noedd
++
++		pusha
++		sub sp,10h
++		push 0
++		push 0
++		push 0
++		push 0
++		push 0
++		push 0
++		push 1ah
++		xor esi, esi
++		mov si,sp
++		mov ah,48h			; EDD get drive parameters
++		mov dl,[ADVDrive]
++		push ds
++		push ss
++		pop ds
++		mov word [si+18h], 512
++		cld
++		int 13h
++		mov ax, [si+18h]
++		pop ds
++		mov [ADVSsz], ax
++		add sp,1eh
++		popa
++
+ 		mov si,.ebios
+ .noedd:
+ 
+@@ -375,23 +401,6 @@ adv_read_write:
+ 
+ 		extern xfer_buf_seg
+ .ebios:
+-		pusha
+-		sub sp,1ch
+-		push 1eh
+-		mov si,sp
+-		mov ah,48h			; EDD get drive parameters
+-		mov dl,[ADVDrive]
+-		push ds
+-		push ss
+-		pop ds
+-		mov word [si+18h], 512
+-		int 13h
+-		mov ax, [si+18h]
+-		pop ds
+-		mov [ADVSsz], ax
+-		add sp,1eh
+-		popa
+-
+ 		mov cx,adv_retries
+ .eb_retry:
+ 		; Form DAPA on stack
+@@ -450,6 +459,7 @@ adv_read_write:
+ 		; copy it back
+ 		pusha
+ 		push ds
++		cld
+ 		mov si, di
+ 		mov di, bx
+ 		push xfer_buf_seg
