@@ -3,7 +3,7 @@ Add additional checks to ext2 loader
 Signed-off-by: Frediano Ziglio <frediano.ziglio@citrix.com>
 
 diff --git a/core/fs/ext2/ext2.c b/core/fs/ext2/ext2.c
-index bddde8d..8f0f2a4 100644
+index 7988faa..cf1c754 100644
 --- a/core/fs/ext2/ext2.c
 +++ b/core/fs/ext2/ext2.c
 @@ -139,6 +139,8 @@ ext2_get_inode(struct fs_info *fs, int inr)
@@ -15,12 +15,3 @@ index bddde8d..8f0f2a4 100644
  
      return (const struct ext2_inode *)
  	(data + block_off * EXT2_SB(fs)->s_inode_size);
-@@ -164,7 +166,7 @@ static struct inode *ext2_iget_by_inr(struct fs_info *fs, uint32_t inr)
-     struct inode *inode;
- 
-     e_inode = ext2_get_inode(fs, inr);
--    if (!(inode = alloc_inode(fs, inr, sizeof(struct ext2_pvt_inode))))
-+    if (!e_inode || !(inode = alloc_inode(fs, inr, sizeof(struct ext2_pvt_inode))))
- 	return NULL;
-     fill_inode(inode, e_inode);
- 
