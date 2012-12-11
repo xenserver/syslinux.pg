@@ -240,10 +240,10 @@ index 0000000..819bf0f
 +0f[F1-Standard] [F2-Advanced]05
 diff --git a/xenmk/syslinux.spec.in b/xenmk/syslinux.spec.in
 new file mode 100644
-index 0000000..b58cee7
+index 0000000..abc006a
 --- /dev/null
 +++ b/xenmk/syslinux.spec.in
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,292 @@
 +Summary: Simple kernel loader which boots from a FAT filesystem
 +Name: syslinux
 +Version: @SYSLINUX_VERSION@
@@ -341,6 +341,18 @@ index 0000000..b58cee7
 +%{_prefix}/share/syslinux
 +/boot
 +/tftpboot
++
++%post
++# check is already installed and upgrade
++if test -e /boot/ldlinux.sys && /sbin/extlinux --install /boot &> /dev/null; then
++	# upgrade files into /boot directory needed by Xen
++	for f in chain.c32 mboot.c32 menu.c32; do
++		fn=/usr/share/syslinux/$f
++		if test -r $fn && ! cmp -s $fn /boot/$f; then
++			cp -f $fn /boot/$f
++		fi
++	done
++fi
 +
 +%changelog
 +* Tue Aug 22 2006 Jesse Keating <jkeating@redhat.com> - 3.11-4
