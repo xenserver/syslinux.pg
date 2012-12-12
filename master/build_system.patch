@@ -240,7 +240,7 @@ index 0000000..819bf0f
 +0f[F1-Standard] [F2-Advanced]05
 diff --git a/xenmk/syslinux.spec.in b/xenmk/syslinux.spec.in
 new file mode 100644
-index 0000000..abc006a
+index 0000000..62fb4ed
 --- /dev/null
 +++ b/xenmk/syslinux.spec.in
 @@ -0,0 +1,292 @@
@@ -344,7 +344,7 @@ index 0000000..abc006a
 +
 +%post
 +# check is already installed and upgrade
-+if test -e /boot/ldlinux.sys && /sbin/extlinux --install /boot &> /dev/null; then
++if test -e /boot/ldlinux.sys && /sbin/extlinux --install /boot > /dev/null 2>&1 ; then
 +	# upgrade files into /boot directory needed by Xen
 +	for f in chain.c32 mboot.c32 menu.c32; do
 +		fn=/usr/share/syslinux/$f
