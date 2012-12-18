@@ -8,3 +8,4 @@ boot_dynamic_sector.patch
 boot_implement_and_use_rdwr_bytes.patch
 boot_fix_adv.patch
 boot_workaround_getinfo_bug.patch
+require.patch
