@@ -1,19 +1,18 @@
 diff --git a/xenmk/syslinux.spec.in b/xenmk/syslinux.spec.in
-index 62fb4ed..b297893 100644
+index 62fb4ed..14f8a50 100644
 --- a/xenmk/syslinux.spec.in
 +++ b/xenmk/syslinux.spec.in
-@@ -16,7 +16,9 @@ Requires: libc.so.6
+@@ -16,7 +16,8 @@ Requires: libc.so.6
  %ifarch x86_64
  Requires: libc.so.6()(64bit)
  %endif
 -BuildRequires: binutils220 binutils220-ld gcc44
 +BuildRequires: %(rpm -q binutils220 > /dev/null 2>&1 && echo 'binutils220, binutils220-ld' || echo "binutils >= 2.20")
 +BuildRequires: %(rpm -q gcc44       > /dev/null 2>&1 && echo gcc44          || echo "gcc >= 4.4")
-+BuildRequires: libuuid-devel
  Obsoletes: syslinux-devel < %{version}-%{release}
  Provides: syslinux-devel
  
-@@ -44,11 +46,15 @@ MEMDISK, which loads legacy operating systems from these media.
+@@ -44,11 +45,15 @@ MEMDISK, which loads legacy operating systems from these media.
  rm -rf fakedir
  mkdir fakedir
  cd fakedir
