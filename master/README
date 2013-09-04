@@ -1,0 +1,24 @@
+What is this repository ?
+==========================
+
+This is the repository of XenServer-specific patches to syslinux.
+
+To contribute bug fixes, email them to the XenServer development mailing
+
+    list (xs-devel@lists.xenserver.org).
+                                            
+For any new features, please work with the upstream syslinux project and request
+backports by emailing the XenServer development mailing list
+
+    (xs-devel@lists.xenserver.org).
+
+Refer to http://www.syslinux.org/wiki/index.php/Development for information on
+contributing to the syslinux project.
+
+
+
+What other documentation is available ?
+========================================
+
+To install syslinux for XenServer please read INSTALL.
+

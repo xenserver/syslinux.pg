@@ -1,0 +1,55 @@
+There are prerequisites for building a syslinux source release for XenServer.
+All the following must be installed, either by visiting the project webpage or
+installing a pre-built package provided by your OS distributor. These install
+notes assume a CentOS 6.4 or similar distribution:
+   * GCC v4.4 or later
+   * GNU Make
+   * GNU Binutils v2.20 or later
+   * RPM build
+   * NASM v2.03 or later
+   * Redhat rpm config (if debuginfo is required)
+   * Development install of bzip2 (e.g.,bzip2-devel)
+
+
+Follow these steps to build an RPM.
+
+1. Clone the syslinux.git repository to /some/path/syslinux
+
+2. Clone syslinux.pq.git repository to /some/path/syslinux/.git/patches
+   
+3. cd /some/path/syslinux and create a working branch:
+   git branch -f patchqueue
+   git checkout patchqueue
+
+4. cd .git/patches and make patchqueue branch use the master branch patches:
+   ln -sf master patchqueue
+   touch patchqueue/status
+
+5. Check to see all the patches are visibile in the working branch patchqueue:
+   cd /some/path/syslinux
+   guilt series
+
+6. Do a `guilt push -a` to apply all the patches
+
+7. Generate the source distribution in SOURCES directory:
+   set -e; cd /some/path/syslinux; git archive --prefix=syslinux-4.06/ HEAD | tar xf -; \ 
+        rm -rf syslinux-4.06/xenmk syslinux-4.06/.gitattributes; \
+        tar jcf /usr/src/redhat/SOURCES/syslinux-4.06.tar.bz2 syslinux-4.06; rm -rf syslinux-4.06
+
+8. Generate the patch file in SOURCES directory:
+   cd /some/path/syslinux && git diff > /usr/src/redhar/SOURCES/syslinux-development.patch
+
+9. Generate the spec file in SPECS directory:
+   sed -e s\,@SYSLINUX_VERSION@,4.06,g\
+       -e s\,@SYSLINUX_RELEASE@,xs18.5651,g\
+       -e \\,%changelog,rchangelog.tmp             \
+       < /some/path/syslinux/syslinux.spec.in      \
+       > /usr/src/redhat/SPECS/syslinux.spec
+
+10. To build the RPMs run:
+    cd /usr/src/redhat/SPECS/
+    rpmbuild --define "_smp_mflags -j4" --define "vendor Citrix Systems, Inc." -bb /usr/src/redhat/SPECS/syslinux-xen.spec
+
+11. Install using
+    rpm -ivh /usr/src/redhat/RPMS/i386/syslinux-*.rpm
+
