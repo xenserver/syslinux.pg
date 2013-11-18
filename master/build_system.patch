@@ -130,7 +130,7 @@ index 0000000..71dda0b
 +	-rm changelog.tmp
 +
 +$(RPM_BUILD_COOKIE): $(RPM_DIRECTORIES) $(SOURCES)
-+	$(RPMBUILD) --target i686 -ba $(RPM_SPECSDIR)/syslinux.spec
++	$(RPMBUILD) --target $(DOMAIN0_ARCH_OPTIMIZED) -ba $(RPM_SPECSDIR)/syslinux.spec
 +	@touch $@
 +
 +$(MY_OBJ_DIR)/splash.lss: $(RPM_BUILD_COOKIE) $(BRANDING_DIR)/splash.ppm
