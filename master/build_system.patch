@@ -339,7 +339,7 @@ index 0000000..62fb4ed
 +%{_sbindir}/*
 +%{_prefix}/lib/syslinux
 +%{_prefix}/share/syslinux
-+/boot
++/boot/extlinux/*
 +/tftpboot
 +
 +%post
