@@ -168,7 +168,7 @@ index 0000000..4c159cb
 +	@ :
 diff --git a/xenmk/isolinux.cfg.in b/xenmk/isolinux.cfg.in
 new file mode 100644
-index 0000000..f82a5e8
+index 0000000..503eb75
 --- /dev/null
 +++ b/xenmk/isolinux.cfg.in
 @@ -0,0 +1,25 @@
@@ -187,7 +187,7 @@ index 0000000..f82a5e8
 +	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=1024M,max:1024M console=vga --- /boot/vmlinuz console=tty0 --- /install.img
 +LABEL safe
 +	KERNEL mboot.c32
-+	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=1024M,max:1024M nosmp noreboot noirqbalance acpi=off noapic com1=115200,8n1 console=com1,vga vga=keep --- /boot/vmlinuz nousb xencons=hvc console=hvc0 console=tty0 --- /install.img
++	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=1024M,max:1024M nosmp noreboot noirqbalance no-mce no-bootscrub no-numa no-hap no-mmcfg iommu=off max_cstate=0 nmi=ignore allow_unsafe com1=115200,8n1 console=com1,vga vga=keep --- /boot/vmlinuz nousb xencons=hvc console=hvc0 console=tty0 --- /install.img
 +LABEL multipath
 +	KERNEL mboot.c32
 +	APPEND /boot/xen.gz dom0_max_vcpus=1-2 dom0_mem=1024M,max:1024M com1=115200,8n1 console=com1,vga --- /boot/vmlinuz xencons=hvc console=hvc0 console=tty0 device_mapper_multipath=enabled --- /install.img
